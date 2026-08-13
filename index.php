@@ -282,6 +282,15 @@ var ZOOM_MIN = 0.5;
 var ZOOM_MAX = 3;
 var ZOOM_STEP = 0.25;
 var INFO_BOTTOM_BASE_MARGIN = 711;
+// Base clustering radius (see show()'s merge check below), applied at
+// zoom=1. Points within this many pixels of each other in the BASE,
+// unzoomed 966x732 coordinate space get combined into a single "group"
+// marker -- that decision is made here in JS, before any CSS zoom is
+// ever applied to the DOM, so zooming in visually enlarged the same
+// merged blob without ever separating it. Scaling this radius down as
+// zoom increases (see show()) means points that were previously merged
+// become individually clickable at higher zoom levels.
+var POINT_MERGE_RADIUS_BASE = 3;
 
 function applyZoom()
 {
@@ -292,6 +301,11 @@ function applyZoom()
   // lands just below the map regardless of zoom level.
   document.getElementById("info_bottom").style.marginTop = (INFO_BOTTOM_BASE_MARGIN * current_zoom) + "px";
   document.getElementById("zoom-level").innerHTML = Math.round(current_zoom * 100) + "%";
+  // Re-render points immediately so merge/split decisions reflect the
+  // new zoom level right away rather than waiting for the next poll.
+  if (typeof last_online_data !== "undefined" && last_online_data) {
+    show(last_online_data);
+  }
 }
 
 function zoomIn()
@@ -616,9 +630,15 @@ function switchworld(n)
   }
 }
 
+// Added 2026-08-13: caches the last-received online-players payload so
+// applyZoom() can re-run show() immediately when the zoom level changes,
+// instead of waiting up to LLMChatter's own poll interval for the merge
+// radius to actually take effect.
+var last_online_data = null;
 
 function show(data)
 {
+  last_online_data = data;
   if(!data)
   {
     var object;
@@ -661,6 +681,13 @@ function show(data)
   group_line = '';
   i = maps_count;
 
+  // Merge radius scaled inversely with zoom (2026-08-13): at zoom=1 this
+  // is the original fixed value (3px); zooming in shrinks it, so points
+  // that were previously close enough to merge require correspondingly
+  // less on-screen separation to now render as distinct, individually
+  // clickable markers.
+  var merge_radius = POINT_MERGE_RADIUS_BASE / current_zoom;
+
   while (i < data.length)
   {
     if (data[i].race==2 || data[i].race==5 || data[i].race==6 || data[i].race==8 || data[i].race==10)
@@ -683,7 +710,7 @@ function show(data)
       pos = get_player_position(data[i].x,data[i].y,data[i].map);
       while(n != point_count)
       {
-        if(data[i].map == mpoints[n].map_id && Math.sqrt(Math.pow(pos.x-mpoints[n].x,2)+Math.pow(pos.y-mpoints[n].y,2)) < 3)
+        if(data[i].map == mpoints[n].map_id && Math.sqrt(Math.pow(pos.x-mpoints[n].x,2)+Math.pow(pos.y-mpoints[n].y,2)) < merge_radius)
           break;
         n++;
       }
