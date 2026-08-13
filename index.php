@@ -19,18 +19,18 @@ body {
     background-color: #000000;
 }
 /* Added 2026-08-13: zoom feature. #map-wrapper becomes the positioning
-   context for the map/points layers below instead of body -- their
-   existing "left:50%; margin-left:-483px" centering math still works
-   unchanged, since 50% of this wrapper's fixed 966px width minus 483px
-   lands them at x=0, exactly where they need to be. Using CSS `zoom`
-   rather than `transform: scale()` deliberately: `zoom` actually resizes
-   the element's layout box, so the page can scroll to reach zoomed-in
-   content; `transform` only repaints visually and leaves anything outside
-   the original bounds unreachable. */
+   context for the map/points layers below instead of body. Sized to the
+   LARGER Azeroth layer (2600x2400, see below) since #map-wrapper must fit
+   whichever layer is biggest; Outland/Northrend (still 966x732 -- not yet
+   replaced with higher-res source) sit inside the same wrapper at their
+   own smaller size. Using CSS `zoom` rather than `transform: scale()`
+   deliberately: `zoom` actually resizes the element's layout box, so the
+   page can scroll to reach zoomed-in content; `transform` only repaints
+   visually and leaves anything outside the original bounds unreachable. */
 #map-wrapper {
     position: relative;
-    width: 966px;
-    height: 732px;
+    width: 2600px;
+    height: 2400px;
     margin: 0 auto;
 }
 #zoom-controls {
@@ -63,13 +63,20 @@ body {
     font-size: 11px;
     color: #EABA28;
 }
+/* World (Azeroth) resized 2026-08-13: swapped in a much higher-resolution
+   source image (2600x2400 vs the previous 966x732). The position math in
+   get_player_position() below was recalibrated to match THIS image's
+   actual framing, rather than cropping/warping the new image to fit the
+   old math -- see build history in the JS below for how that calibration
+   was derived. */
 #world {
     position: absolute;
-    height: 732px;
-    width: 966px;
+    height: 2400px;
+    width: 2600px;
     left: 50%;
-    margin-left: -483px;
+    margin-left: -1300px;
     background-image: url(<?php echo $img_base ?>azeroth.jpg);
+    background-size: 2600px 2400px;
     z-index: 10;
 }
 #outland {
@@ -94,10 +101,10 @@ body {
 }
 #pointsOldworld {
     position: absolute;
-    height: 732px;
-    width: 966px;
+    height: 2400px;
+    width: 2600px;
     left: 50%;
-    margin-left: -483px;
+    margin-left: -1300px;
     z-index: 100;
 }
 #pointsOutland {
@@ -147,6 +154,70 @@ body {
     margin-left: -483px;
     z-index: 101;
     text-align: center;
+}
+/* Player table added 2026-08-13. Sits below the map, sized to the page
+   rather than the (zoomable) map-wrapper, so it doesn't zoom/shrink along
+   with the map itself -- it's positioned dynamically via JS (see
+   repositionBelowMap()) since the map's effective height changes with
+   both zoom level and which continent is selected. */
+#player-table-wrapper {
+    position: absolute;
+    left: 50%;
+    width: 900px;
+    margin-left: -450px;
+    z-index: 101;
+}
+#player-table-wrapper h3 {
+    font-family: Georgia, "Times New Roman", Times, serif;
+    color: #FFFF99;
+    font-size: 16px;
+    margin: 0 0 6px 0;
+    text-align: center;
+}
+#player-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: verdana, arial, sans-serif, helvetica;
+    font-size: 12px;
+    background: rgba(0,0,0,0.6);
+}
+#player-table th {
+    background: #2a2a2a;
+    color: #EABA28;
+    text-align: left;
+    padding: 6px 8px;
+    cursor: pointer;
+    border-bottom: 2px solid #EABA28;
+    user-select: none;
+}
+#player-table th:hover {
+    background: #3a3a3a;
+}
+#player-table th .sort-arrow {
+    color: #FFFF99;
+    margin-left: 4px;
+}
+#player-table td {
+    padding: 5px 8px;
+    color: #dddddd;
+    border-bottom: 1px solid #333333;
+}
+#player-table tr:hover td {
+    background: rgba(234, 186, 40, 0.08);
+}
+#player-table td.faction-alliance {
+    color: #4FB3D9;
+}
+#player-table td.faction-horde {
+    color: #E05A45;
+}
+#player-table-empty {
+    text-align: center;
+    color: #999999;
+    font-style: italic;
+    padding: 12px;
+    font-family: verdana, arial, sans-serif, helvetica;
+    font-size: 12px;
 }
 #timer {
     font-family: arial;
@@ -276,30 +347,48 @@ var statusUpdateInterval = 50;
 var pointx;
 var pointy;
 
-// Added 2026-08-13: zoom feature.
-var current_zoom = 1;
-var ZOOM_MIN = 0.5;
-var ZOOM_MAX = 3;
-var ZOOM_STEP = 0.25;
-var INFO_BOTTOM_BASE_MARGIN = 711;
+// Added 2026-08-13: zoom feature. Defaults tuned for the new high-res
+// Azeroth layer (2600x2400 native) -- zoom=1 (native pixels) would be far
+// too large to view without heavy scrolling on a typical screen, so the
+// default starts zoomed out to roughly fit a normal browser window, with
+// room to zoom in well past 100% to actually take advantage of the extra
+// source resolution.
+var current_zoom = 0.4;
+var ZOOM_MIN = 0.15;
+var ZOOM_MAX = 2.0;
+var ZOOM_STEP = 0.1;
+// Per-map native layer height, keyed by the same map-layer index used by
+// getMapLayerByID()/getPointsLayerByID() (0=Azeroth, 1=Outland,
+// 2=Northrend). Needed because #info_bottom and the player table sit
+// below #map-wrapper and must reposition based on which layer is showing
+// -- Azeroth is now 2400px tall, Outland/Northrend are still 732px
+// (unchanged, not yet replaced with higher-res source).
+var MAP_LAYER_HEIGHT = [2400, 732, 732];
 // Base clustering radius (see show()'s merge check below), applied at
 // zoom=1. Points within this many pixels of each other in the BASE,
-// unzoomed 966x732 coordinate space get combined into a single "group"
-// marker -- that decision is made here in JS, before any CSS zoom is
-// ever applied to the DOM, so zooming in visually enlarged the same
+// unzoomed native-resolution coordinate space get combined into a single
+// "group" marker -- that decision is made here in JS, before any CSS zoom
+// is ever applied to the DOM, so zooming in visually enlarged the same
 // merged blob without ever separating it. Scaling this radius down as
 // zoom increases (see show()) means points that were previously merged
-// become individually clickable at higher zoom levels.
-var POINT_MERGE_RADIUS_BASE = 3;
+// become individually clickable at higher zoom levels. Bumped from 3 to 8
+// to match the new, much higher-resolution Azeroth coordinate space --
+// the old value was calibrated for a 966px-wide image and would barely
+// ever trigger a merge on a 2600px-wide one.
+var POINT_MERGE_RADIUS_BASE = 8;
+
+function repositionBelowMap()
+{
+  var layerHeight = MAP_LAYER_HEIGHT[current_map] || MAP_LAYER_HEIGHT[0];
+  var offset = layerHeight * current_zoom;
+  document.getElementById("info_bottom").style.marginTop = offset + "px";
+  document.getElementById("player-table-wrapper").style.marginTop = (offset + 30) + "px";
+}
 
 function applyZoom()
 {
   document.getElementById("map-wrapper").style.zoom = current_zoom;
-  // #info_bottom sits at a fixed 711px offset from the map's top edge in
-  // the unzoomed layout, but it lives outside #map-wrapper (so it doesn't
-  // zoom with the map itself) -- scale its margin to match so it still
-  // lands just below the map regardless of zoom level.
-  document.getElementById("info_bottom").style.marginTop = (INFO_BOTTOM_BASE_MARGIN * current_zoom) + "px";
+  repositionBelowMap();
   document.getElementById("zoom-level").innerHTML = Math.round(current_zoom * 100) + "%";
   // Re-render points immediately so merge/split decisions reflect the
   // new zoom level right away rather than waiting for the next poll.
@@ -322,7 +411,7 @@ function zoomOut()
 
 function zoomReset()
 {
-  current_zoom = 1;
+  current_zoom = 0.4;
   applyZoom();
 }
 
@@ -529,10 +618,10 @@ function get_player_position(x,y,m)
    xpos = Math.round(x * 0.050085);
    ypos = Math.round(y * 0.050085);
    }
- else {              //Azeroth
-   xpos = Math.round(x * 0.025140);
-   ypos = Math.round(y * 0.025140);
-   }
+ // Azeroth (map 0/1) no longer computes a shared xpos/ypos here -- each
+ // continent now has its own scale (see build history below), so that
+ // math moved directly into cases '0' and '1'.
+
  switch (m) {
    case '530':
     if(where_530 == 1) {
@@ -554,16 +643,40 @@ function get_player_position(x,y,m)
     pos.y = 232 - xpos;
     break;
    case '1':
-    pos.x = 194 - ypos;
-    pos.y = 398 - xpos;
+    // Kalimdor -- recalibrated 2026-08-13 for the new 2600x2400 azeroth.jpg.
+    //
+    // Build history: the old formula (pos.x = 194 - ypos; pos.y = 398 -
+    // xpos; with xpos/ypos = game coord * 0.025140) was calibrated for
+    // the previous 966x732 image and specific to its exact framing/crop.
+    // Rather than crop or warp the new, much higher-resolution source
+    // image to match that old framing, the position math itself was
+    // recalibrated to the new image instead. Derivation: algorithmically
+    // detected the actual on-screen bounding box of each continent's
+    // landmass in both the old and new images (largest connected
+    // non-background region, found via flood-fill/connected-components
+    // on pixel color distance from the background color -- NOT manual
+    // eyeballing, to avoid introducing subjective error), then computed
+    // the per-axis linear scale+offset that maps old-image pixel space
+    // onto new-image pixel space for that continent's bounding box, and
+    // composed that with the original game-coordinate formula above to
+    // get a new formula expressed directly in game coordinates. Validated
+    // by plotting several real, live bot coordinates (pulled from the
+    // actual pomm_play.php feed) through both the old and new formulas
+    // and confirming they land in matching relative positions on both
+    // images before shipping this.
+    pos.x = 498.4435 - y * 0.089848;
+    pos.y = 1267.6419 - x * 0.078421;
     break;
    case '0':
-    pos.x = 752 - ypos;
-    pos.y = 291 - xpos;
+    // Eastern Kingdoms -- recalibrated 2026-08-13, same method as
+    // Kalimdor above (separate bounding box/offset, since the two
+    // continents sit in different regions of the shared canvas).
+    pos.x = 1824.0000 - y * 0.089786;
+    pos.y = 1190.2789 - x * 0.070225;
     break;
    default:
-    pos.x = 194 - ypos;
-    pos.y = 398 - xpos;
+    pos.x = 498.4435 - y * 0.089848;
+    pos.y = 1267.6419 - x * 0.078421;
  }
  return pos;
 }
@@ -628,17 +741,139 @@ function switchworld(n)
       obj_points_layer.style.visibility = "hidden";
     }
   }
+  current_map = n;
+  repositionBelowMap();
 }
 
 // Added 2026-08-13: caches the last-received online-players payload so
 // applyZoom() can re-run show() immediately when the zoom level changes,
 // instead of waiting up to LLMChatter's own poll interval for the merge
-// radius to actually take effect.
+// radius to actually take effect. Also feeds the sortable player table.
 var last_online_data = null;
+
+// ---- Sortable player table (added 2026-08-13) ----
+var tableSortColumn = "name";
+var tableSortDirection = 1; // 1 = ascending, -1 = descending
+var currentPlayerList = [];
+
+var TABLE_COLUMNS = [
+  { key: "name",    label: "Name" },
+  { key: "level",   label: "Level" },
+  { key: "class",   label: "Class" },
+  { key: "race",    label: "Race" },
+  { key: "zone",    label: "Zone" },
+  { key: "faction", label: "Faction" }
+];
+
+function sortTableBy(column)
+{
+  if (tableSortColumn === column)
+  {
+    tableSortDirection = -tableSortDirection;
+  }
+  else
+  {
+    tableSortColumn = column;
+    tableSortDirection = 1;
+  }
+  renderPlayerTableRows();
+}
+
+function buildPlayerTableHeader()
+{
+  var thead = document.getElementById("player-table-head");
+  var html = "<tr>";
+  for (var i = 0; i < TABLE_COLUMNS.length; i++)
+  {
+    var col = TABLE_COLUMNS[i];
+    var arrow = "";
+    if (tableSortColumn === col.key)
+    {
+      arrow = '<span class="sort-arrow">' + (tableSortDirection === 1 ? "\u25B2" : "\u25BC") + '</span>';
+    }
+    html += '<th onclick="sortTableBy(\'' + col.key + '\');">' + col.label + arrow + '</th>';
+  }
+  html += "</tr>";
+  thead.innerHTML = html;
+}
+
+function renderPlayerTableRows()
+{
+  buildPlayerTableHeader();
+  var tbody = document.getElementById("player-table-body");
+  var emptyMsg = document.getElementById("player-table-empty");
+  var table = document.getElementById("player-table");
+
+  if (!currentPlayerList.length)
+  {
+    table.style.display = "none";
+    emptyMsg.style.display = "block";
+    return;
+  }
+  table.style.display = "table";
+  emptyMsg.style.display = "none";
+
+  var sorted = currentPlayerList.slice().sort(function(a, b)
+  {
+    var av = a[tableSortColumn];
+    var bv = b[tableSortColumn];
+    if (typeof av === "string")
+    {
+      av = av.toLowerCase();
+      bv = bv.toLowerCase();
+    }
+    if (av < bv) return -1 * tableSortDirection;
+    if (av > bv) return 1 * tableSortDirection;
+    return 0;
+  });
+
+  var html = "";
+  for (var i = 0; i < sorted.length; i++)
+  {
+    var p = sorted[i];
+    var factionClass = p.faction === "Horde" ? "faction-horde" : "faction-alliance";
+    html += "<tr>";
+    html += "<td>" + p.name + "</td>";
+    html += "<td>" + p.level + "</td>";
+    html += "<td>" + p.className + "</td>";
+    html += "<td>" + p.raceName + "</td>";
+    html += "<td>" + p.zone + "</td>";
+    html += '<td class="' + factionClass + '">' + p.faction + "</td>";
+    html += "</tr>";
+  }
+  tbody.innerHTML = html;
+}
+
+function renderPlayerTable(data)
+{
+  currentPlayerList = [];
+  if (!data)
+  {
+    renderPlayerTableRows();
+    return;
+  }
+
+  var i = maps_count;
+  while (i < data.length)
+  {
+    var isHorde = (data[i].race==2 || data[i].race==5 || data[i].race==6 || data[i].race==8 || data[i].race==10);
+    currentPlayerList.push({
+      name: data[i].name,
+      level: parseInt(data[i].level, 10),
+      className: class_name[data[i].cl],
+      raceName: race_name[data[i].race],
+      zone: data[i].zone,
+      faction: isHorde ? "Horde" : "Alliance"
+    });
+    i++;
+  }
+  renderPlayerTableRows();
+}
 
 function show(data)
 {
   last_online_data = data;
+  renderPlayerTable(data);
   if(!data)
   {
     var object;
@@ -682,10 +917,10 @@ function show(data)
   i = maps_count;
 
   // Merge radius scaled inversely with zoom (2026-08-13): at zoom=1 this
-  // is the original fixed value (3px); zooming in shrinks it, so points
-  // that were previously close enough to merge require correspondingly
-  // less on-screen separation to now render as distinct, individually
-  // clickable markers.
+  // is the original fixed value (POINT_MERGE_RADIUS_BASE); zooming in
+  // shrinks it, so points that were previously close enough to merge
+  // require correspondingly less on-screen separation to now render as
+  // distinct, individually clickable markers.
   var merge_radius = POINT_MERGE_RADIUS_BASE / current_zoom;
 
   while (i < data.length)
@@ -983,6 +1218,7 @@ function display()
 
 function start()
 {
+  applyZoom();
   reset();
   //display();
 
@@ -1001,7 +1237,7 @@ function start()
 
 <div id="zoom-controls">
     <button onClick="zoomIn();" title="Zoom in">+</button>
-    <div id="zoom-level">100%</div>
+    <div id="zoom-level">40%</div>
     <button onClick="zoomOut();" title="Zoom out">&minus;</button>
     <button onClick="zoomReset();" title="Reset zoom" style="font-size: 11px;">Reset</button>
 </div>
@@ -1036,4 +1272,17 @@ function start()
     </table>
     </center>
 </div>
+
+<!-- Sortable player table, added 2026-08-13. Click any column header to
+     sort by it; click again to reverse direction. Stays in sync with the
+     same live poll cycle that drives the map itself. -->
+<div id="player-table-wrapper">
+    <h3>Online Players</h3>
+    <table id="player-table">
+        <thead id="player-table-head"></thead>
+        <tbody id="player-table-body"></tbody>
+    </table>
+    <div id="player-table-empty" style="display:none;">No players currently online.</div>
+</div>
+
 </BODY></HTML>
