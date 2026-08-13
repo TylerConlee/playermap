@@ -643,40 +643,42 @@ function get_player_position(x,y,m)
     pos.y = 232 - xpos;
     break;
    case '1':
-    // Kalimdor -- recalibrated 2026-08-13 for the new 2600x2400 azeroth.jpg.
+    // Kalimdor -- recalibrated 2026-08-13, SECOND pass, for the new
+    // 2600x2400 azeroth.jpg.
     //
-    // Build history: the old formula (pos.x = 194 - ypos; pos.y = 398 -
-    // xpos; with xpos/ypos = game coord * 0.025140) was calibrated for
-    // the previous 966x732 image and specific to its exact framing/crop.
-    // Rather than crop or warp the new, much higher-resolution source
-    // image to match that old framing, the position math itself was
-    // recalibrated to the new image instead. Derivation: algorithmically
-    // detected the actual on-screen bounding box of each continent's
-    // landmass in both the old and new images (largest connected
-    // non-background region, found via flood-fill/connected-components
-    // on pixel color distance from the background color -- NOT manual
-    // eyeballing, to avoid introducing subjective error), then computed
-    // the per-axis linear scale+offset that maps old-image pixel space
-    // onto new-image pixel space for that continent's bounding box, and
-    // composed that with the original game-coordinate formula above to
-    // get a new formula expressed directly in game coordinates. Validated
-    // by plotting several real, live bot coordinates (pulled from the
-    // actual pomm_play.php feed) through both the old and new formulas
-    // and confirming they land in matching relative positions on both
-    // images before shipping this.
-    pos.x = 498.4435 - y * 0.089848;
-    pos.y = 1267.6419 - x * 0.078421;
+    // Build history: a FIRST recalibration attempt (bounding-box
+    // correspondence between the old 966x732 image and the new one,
+    // no real coordinate ground truth involved) shipped and was visibly
+    // wrong -- zones were misaligned once real bots were checked against
+    // known locations. This second pass instead uses actual ground
+    // truth: real .gps readings taken in-game at Orgrimmar and at
+    // Red Rocks/Mulgore (near Thunderbluff), combined with pixel
+    // positions of those same two cities measured on a separately
+    // sourced, fully-labeled reference world map (a different art style
+    // from either the old or new azeroth.jpg, used purely as a
+    // measurement bridge). That gave an exact linear solve (2 known
+    // points per axis, not an approximation) from real WoW coordinates
+    // to reference-map pixels, which was then bridged to the new
+    // azeroth.jpg via the two images' landmass bounding boxes. Validated
+    // by plotting all 4 ground-truth points (2 per continent) through
+    // the final composed formula and confirming visually they land in
+    // the correct, geographically-plausible zones on the actual new
+    // image (Orgrimmar in Durotar's orange terrain, Kharanos/Ironforge
+    // directly on the Dun Morogh snow-cap, Stormwind just south of it in
+    // green terrain) before shipping.
+    pos.x = 392.1471 - y * 0.156309;
+    pos.y = 1120.7884 - x * 0.100326;
     break;
    case '0':
-    // Eastern Kingdoms -- recalibrated 2026-08-13, same method as
-    // Kalimdor above (separate bounding box/offset, since the two
-    // continents sit in different regions of the shared canvas).
-    pos.x = 1824.0000 - y * 0.089786;
-    pos.y = 1190.2789 - x * 0.070225;
+    // Eastern Kingdoms -- recalibrated 2026-08-13, second pass, same
+    // ground-truth method as Kalimdor above (real .gps readings at
+    // Kharanos and Stormwind, bridged via the labeled reference map).
+    pos.x = 1706.4554 - y * 0.122376;
+    pos.y = 543.4356 - x * 0.125988;
     break;
    default:
-    pos.x = 498.4435 - y * 0.089848;
-    pos.y = 1267.6419 - x * 0.078421;
+    pos.x = 392.1471 - y * 0.156309;
+    pos.y = 1120.7884 - x * 0.100326;
  }
  return pos;
 }
