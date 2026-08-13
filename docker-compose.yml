@@ -1,0 +1,24 @@
+services:
+    playermap:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        environment:
+            DB_HOST: ${DB_HOST}
+            DB_PORT: ${DB_PORT}
+            DB_USER: ${DB_USER}
+            DB_PASSWORD: ${DB_PASSWORD}
+            GAME_SERVER_WAN_ADDR: ${GAME_SERVER_WAN_ADDR}
+        networks:
+            - ac-network
+        ports:
+            - "48734:80"
+
+networks:
+    ac-network:
+        # Same pattern as the azerothcore-armory fork: attaches to the
+        # existing azerothcore stack's network by name rather than creating
+        # its own, so playermap can reach ac-database by Docker service name.
+        name: ${DOCKER_AC_NETWORK_NAME:-azerothcore_default}
+        external: ${DOCKER_AC_NETWORK_EXTERNAL:-true}
