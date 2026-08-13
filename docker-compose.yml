@@ -10,6 +10,17 @@ services:
             DB_USER: ${DB_USER}
             DB_PASSWORD: ${DB_PASSWORD}
             GAME_SERVER_WAN_ADDR: ${GAME_SERVER_WAN_ADDR}
+            # Fixed 2026-08-13: this was missing entirely, even though the
+            # config.php code reads it via getenv('GAME_SERVER_HOST'). A
+            # variable existing in .env does NOT automatically become a
+            # container env var -- only ones explicitly listed here do.
+            # Without it, getenv() returned empty, fsockopen() failed
+            # instantly, and the "server online" status check always showed
+            # offline -- completely independent of the character DB query,
+            # which worked the whole time (confirmed via real bot data
+            # showing up in the online-players payload despite the status
+            # flag being wrong).
+            GAME_SERVER_HOST: ${GAME_SERVER_HOST}
         networks:
             - ac-network
         ports:
