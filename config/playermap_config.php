@@ -37,7 +37,13 @@ $characters_db[1]['encoding'] = 'utf8';
 $server_type        =  1;           // 0=MaNGOS, 1=AzerothCore/TrinityCore
 
 // position in array must represent realmd ID, same as in $world_db
-$server[1]['addr']          = getenv('DB_HOST');       // internal Docker network address is fine here, MiniManager runs server-side
+// Fixed 2026-08-13: this was wrongly set to getenv('DB_HOST') (the
+// DATABASE address). func.php's test_realm() does an fsockopen against
+// this addr+port to check whether the game server is online -- pointing
+// it at the database (which doesn't listen on 8085) meant this check
+// always failed, showing "Offline" and suppressing the online-player list
+// regardless of whether anyone was actually logged in.
+$server[1]['addr']          = getenv('GAME_SERVER_HOST');
 $server[1]['addr_wan']      = getenv('GAME_SERVER_WAN_ADDR');
 $server[1]['game_port']     =  8085;
 $server[1]['rev']           = '';
