@@ -26,19 +26,24 @@ body {
    own smaller size. Using CSS `zoom` rather than `transform: scale()`
    deliberately: `zoom` actually resizes the element's layout box, so the
    page can scroll to reach zoomed-in content; `transform` only repaints
-   visually and leaves anything outside the original bounds unreachable. */
+   visually and leaves anything outside the original bounds unreachable.
+   HIDDEN 2026-08-13: map temporarily disabled while position calibration
+   is still being worked out -- see MAP_ENABLED in the JS below. Only the
+   player table is shown for now. Re-enabling later just means flipping
+   MAP_ENABLED back to true and removing this display:none. */
 #map-wrapper {
     position: relative;
     width: 2600px;
     height: 2400px;
     margin: 0 auto;
+    display: none;
 }
 #zoom-controls {
     position: fixed;
     top: 10px;
     right: 10px;
     z-index: 200;
-    display: flex;
+    display: none;
     flex-direction: column;
     gap: 4px;
 }
@@ -125,7 +130,11 @@ body {
     margin-left: -483px;
     z-index: 98;
 }
+/* wow/info (the realm status icon + poll countdown timer) hidden
+   2026-08-13 along with the map -- both were positioned relative to the
+   map area and don't mean much without it visible. */
 #wow {
+    display: none;
     position: absolute;
     height: 98px;
     width: 200px;
@@ -137,6 +146,7 @@ body {
     float: none;
 }
 #info {
+    display: none;
     position: absolute;
     height: 16px;
     width: 40px;
@@ -145,26 +155,28 @@ body {
     z-index: 102;
     text-align: center;
 }
+/* info_bottom/player-table-wrapper positioning simplified 2026-08-13: with
+   the map hidden, these no longer sit "below the map" -- repositionBelowMap()
+   now applies small fixed offsets instead of a map-height-based calculation
+   (see MAP_ENABLED in the JS). The margin-top values below are just the
+   initial/fallback values before JS runs. */
 #info_bottom {
     position: absolute;
     height: 20px;
     width: 966px;
     left: 50%;
-    margin-top: 711px;
+    margin-top: 150px;
     margin-left: -483px;
     z-index: 101;
     text-align: center;
 }
-/* Player table added 2026-08-13. Sits below the map, sized to the page
-   rather than the (zoomable) map-wrapper, so it doesn't zoom/shrink along
-   with the map itself -- it's positioned dynamically via JS (see
-   repositionBelowMap()) since the map's effective height changes with
-   both zoom level and which continent is selected. */
+/* Player table added 2026-08-13. */
 #player-table-wrapper {
     position: absolute;
     left: 50%;
     width: 900px;
     margin-left: -450px;
+    margin-top: 190px;
     z-index: 101;
 }
 #player-table-wrapper h3 {
@@ -245,7 +257,7 @@ body {
     width: 156px;
     margin-left: -78px;
     left: 50%;
-    top: 97px;
+    top: 20px;
     text-align: center;
     z-index: 101;
 }
@@ -347,6 +359,15 @@ var statusUpdateInterval = 50;
 var pointx;
 var pointy;
 
+// MAP_ENABLED added 2026-08-13: temporary kill switch for the map while
+// position calibration is still being worked out (see .php commit history
+// for the saga -- two recalibration attempts, still not fully verified).
+// Only the player table and online-status text are shown while this is
+// false. To bring the map back once calibration is confirmed correct,
+// set this to true and remove the `display: none;` rules on #map-wrapper
+// and #zoom-controls in the stylesheet above.
+var MAP_ENABLED = false;
+
 // Added 2026-08-13: zoom feature. Defaults tuned for the new high-res
 // Azeroth layer (2600x2400 native) -- zoom=1 (native pixels) would be far
 // too large to view without heavy scrolling on a typical screen, so the
@@ -362,7 +383,8 @@ var ZOOM_STEP = 0.1;
 // 2=Northrend). Needed because #info_bottom and the player table sit
 // below #map-wrapper and must reposition based on which layer is showing
 // -- Azeroth is now 2400px tall, Outland/Northrend are still 732px
-// (unchanged, not yet replaced with higher-res source).
+// (unchanged, not yet replaced with higher-res source). Unused while
+// MAP_ENABLED is false.
 var MAP_LAYER_HEIGHT = [2400, 732, 732];
 // Base clustering radius (see show()'s merge check below), applied at
 // zoom=1. Points within this many pixels of each other in the BASE,
@@ -379,6 +401,13 @@ var POINT_MERGE_RADIUS_BASE = 8;
 
 function repositionBelowMap()
 {
+  // While the map is hidden, info_bottom/player-table just use the small
+  // fixed offsets already set in CSS -- no map-height-based calculation
+  // needed. Re-enabling the map (MAP_ENABLED = true) restores the
+  // original dynamic behavior.
+  if (!MAP_ENABLED) {
+    return;
+  }
   var layerHeight = MAP_LAYER_HEIGHT[current_map] || MAP_LAYER_HEIGHT[0];
   var offset = layerHeight * current_zoom;
   document.getElementById("info_bottom").style.marginTop = offset + "px";
@@ -387,6 +416,9 @@ function repositionBelowMap()
 
 function applyZoom()
 {
+  if (!MAP_ENABLED) {
+    return;
+  }
   document.getElementById("map-wrapper").style.zoom = current_zoom;
   repositionBelowMap();
   document.getElementById("zoom-level").innerHTML = Math.round(current_zoom * 100) + "%";
@@ -644,7 +676,11 @@ function get_player_position(x,y,m)
     break;
    case '1':
     // Kalimdor -- recalibrated 2026-08-13, SECOND pass, for the new
-    // 2600x2400 azeroth.jpg.
+    // 2600x2400 azeroth.jpg. NOTE: map is currently hidden (MAP_ENABLED =
+    // false) while this calibration is still being verified -- see build
+    // history further down and in the git log. This formula is left
+    // in place so it's ready to go once verification is complete; it is
+    // not currently affecting anything visible.
     //
     // Build history: a FIRST recalibration attempt (bounding-box
     // correspondence between the old 966x732 image and the new one,
@@ -665,7 +701,12 @@ function get_player_position(x,y,m)
     // the correct, geographically-plausible zones on the actual new
     // image (Orgrimmar in Durotar's orange terrain, Kharanos/Ironforge
     // directly on the Dun Morogh snow-cap, Stormwind just south of it in
-    // green terrain) before shipping.
+    // green terrain). A follow-up attempt to cross-verify this against a
+    // live screenshot of the deployed page ran into an unresolved
+    // inconsistency (two independently-identified landmarks implying
+    // different scale factors for the same screenshot) that wasn't
+    // pinned down before the map was hidden -- worth another look before
+    // re-enabling.
     pos.x = 392.1471 - y * 0.156309;
     pos.y = 1120.7884 - x * 0.100326;
     break;
@@ -673,6 +714,7 @@ function get_player_position(x,y,m)
     // Eastern Kingdoms -- recalibrated 2026-08-13, second pass, same
     // ground-truth method as Kalimdor above (real .gps readings at
     // Kharanos and Stormwind, bridged via the labeled reference map).
+    // Same "not yet fully verified" caveat as Kalimdor above.
     pos.x = 1706.4554 - y * 0.122376;
     pos.y = 543.4356 - x * 0.125988;
     break;
@@ -727,6 +769,9 @@ function getPointsLayerByID(id)
 
 function switchworld(n)
 {
+  if (!MAP_ENABLED) {
+    return;
+  }
   for(var i = 0; i < maps_count; i++)
   {
     obj_map_layer = getMapLayerByID(i);
@@ -876,6 +921,9 @@ function show(data)
 {
   last_online_data = data;
   renderPlayerTable(data);
+  if (!MAP_ENABLED) {
+    return;
+  }
   if(!data)
   {
     var object;
@@ -1167,12 +1215,14 @@ function load_data()
           {
             status_data[0] = req.responseJS.status.online;
             var obj = document.getElementById("statusIMG");
-            if(status_data[0] != 1)
-            {
-              obj.src = "<?php echo $img_base ?>realm_off.gif"
+            if (obj) {
+              if(status_data[0] != 1)
+              {
+                obj.src = "<?php echo $img_base ?>realm_off.gif"
+              }
+              else
+                obj.src = "<?php echo $img_base ?>realm_on.gif"
             }
-            else
-              obj.src = "<?php echo $img_base ?>realm_on.gif"
           }
           if(req.responseJS.status.uptime < status_data[1] || status_data[1] == 0)
           {
@@ -1206,7 +1256,10 @@ function display()
   ms = time*1000-ms;
   if ((show_time==1) && (time!=0))
   {
-    document.getElementById("timer").innerHTML=(Math.round(ms/1000));
+    var timerEl = document.getElementById("timer");
+    if (timerEl) {
+      timerEl.innerHTML=(Math.round(ms/1000));
+    }
   }
   if (ms<=0)
   {
@@ -1220,7 +1273,11 @@ function display()
 
 function start()
 {
-  applyZoom();
+  if (MAP_ENABLED) {
+    applyZoom();
+  } else {
+    repositionBelowMap();
+  }
   reset();
   //display();
 
