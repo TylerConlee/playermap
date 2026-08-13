@@ -18,6 +18,51 @@ body {
     color: #EABA28;
     background-color: #000000;
 }
+/* Added 2026-08-13: zoom feature. #map-wrapper becomes the positioning
+   context for the map/points layers below instead of body -- their
+   existing "left:50%; margin-left:-483px" centering math still works
+   unchanged, since 50% of this wrapper's fixed 966px width minus 483px
+   lands them at x=0, exactly where they need to be. Using CSS `zoom`
+   rather than `transform: scale()` deliberately: `zoom` actually resizes
+   the element's layout box, so the page can scroll to reach zoomed-in
+   content; `transform` only repaints visually and leaves anything outside
+   the original bounds unreachable. */
+#map-wrapper {
+    position: relative;
+    width: 966px;
+    height: 732px;
+    margin: 0 auto;
+}
+#zoom-controls {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#zoom-controls button {
+    width: 32px;
+    height: 32px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #EABA28;
+    border: 1px solid #EABA28;
+    border-radius: 4px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    font-family: verdana, arial, sans-serif, helvetica;
+}
+#zoom-controls button:hover {
+    background-color: rgba(234, 186, 40, 0.2);
+}
+#zoom-controls #zoom-level {
+    text-align: center;
+    font-family: verdana, arial, sans-serif, helvetica;
+    font-size: 11px;
+    color: #EABA28;
+}
 #world {
     position: absolute;
     height: 732px;
@@ -230,6 +275,42 @@ var status_next_process = 0;
 var statusUpdateInterval = 50;
 var pointx;
 var pointy;
+
+// Added 2026-08-13: zoom feature.
+var current_zoom = 1;
+var ZOOM_MIN = 0.5;
+var ZOOM_MAX = 3;
+var ZOOM_STEP = 0.25;
+var INFO_BOTTOM_BASE_MARGIN = 711;
+
+function applyZoom()
+{
+  document.getElementById("map-wrapper").style.zoom = current_zoom;
+  // #info_bottom sits at a fixed 711px offset from the map's top edge in
+  // the unzoomed layout, but it lives outside #map-wrapper (so it doesn't
+  // zoom with the map itself) -- scale its margin to match so it still
+  // lands just below the map regardless of zoom level.
+  document.getElementById("info_bottom").style.marginTop = (INFO_BOTTOM_BASE_MARGIN * current_zoom) + "px";
+  document.getElementById("zoom-level").innerHTML = Math.round(current_zoom * 100) + "%";
+}
+
+function zoomIn()
+{
+  current_zoom = Math.min(ZOOM_MAX, Math.round((current_zoom + ZOOM_STEP) * 100) / 100);
+  applyZoom();
+}
+
+function zoomOut()
+{
+  current_zoom = Math.max(ZOOM_MIN, Math.round((current_zoom - ZOOM_STEP) * 100) / 100);
+  applyZoom();
+}
+
+function zoomReset()
+{
+  current_zoom = 1;
+  applyZoom();
+}
 
 function _status_action(text,status_data,text_type,action,time)
 {
@@ -891,18 +972,27 @@ function start()
 </SCRIPT>
 <BODY onload=start()>
 
+<div id="zoom-controls">
+    <button onClick="zoomIn();" title="Zoom in">+</button>
+    <div id="zoom-level">100%</div>
+    <button onClick="zoomOut();" title="Zoom out">&minus;</button>
+    <button onClick="zoomReset();" title="Reset zoom" style="font-size: 11px;">Reset</button>
+</div>
+
 <div onMouseDown="showNextStatusText();" id="serverstatus">
     <table align="center" border="0" cellspacing="0" cellpadding="0" width="156px" height="36px">
         <tr><td id="status" class="statustext"></td></tr>
     </table>
 </div>
 <div id="tip"></div>
+<div id="map-wrapper">
 <div ID="pointsOldworld"></div>
 <div ID="pointsOutland"></div>
 <div ID="pointsNorthrend"></div>
 <div ID="world"></div>
 <div ID="outland"></div>
 <div ID="northrend"></div>
+</div>
 <div ID="wow"><img src="<?php echo $img_base ?>realm_on.gif" id="statusIMG" style="position: absolute; border: 0px; left: 365; top: 0;" onClick="window.location='<?php echo $_SERVER['PHP_SELF'] ?>'"></a>
 </div>
 <div ID="info">
