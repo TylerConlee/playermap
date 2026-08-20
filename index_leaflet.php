@@ -102,10 +102,9 @@ body {
    the same space wowToPixel() outputs into) -- used to get precise,
    reliable ground-truth pixel positions for known landmarks directly from
    the live Leaflet render, instead of an ambiguous screenshot. Left in
-   place after the EK fix below in case Kalimdor/Outland/Northrend ever
-   need the same treatment -- remove entirely (this CSS block + the HTML
-   div + the map click handler in initMap()) once calibration work is
-   fully done across all continents. */
+   place in case further recalibration is ever needed -- remove entirely
+   (this CSS block + the HTML div + the map click handler in initMap())
+   once fully confident in the current calibration.*/
 #calib-readout {
     position: fixed;
     top: 60px;
@@ -300,26 +299,33 @@ var status_process_started;
 // -- normal image convention). toLatLng() below handles the Y-flip
 // Leaflet's CRS.Simple needs.
 //
-// EK RECALIBRATED 2026-08-20. Live screenshots showed a genuine,
-// consistent misalignment for Eastern Kingdoms specifically -- clusters
-// near Stormwind plotted into open ocean west of the actual coastline.
-// Ruled out an image-dimension mismatch first (confirmed served
-// azeroth.jpg is genuinely 2600x2400 via `docker exec ... file`). Root
-// cause was the EK formula itself -- the same calibration inaccuracy
-// flagged as unresolved back when the old map was originally hidden (a
-// prior recalibration pass was only ever validated against a static
-// processed image, never successfully cross-checked against a live
-// render). Fixed properly this time using the click-to-read-pixel-
-// coordinates debug tool (#calib-readout, click handler in initMap()):
-// Tyler clicked precisely on Stormwind and Ironforge on the live Leaflet
-// map, giving exact, deterministic pixel targets (1772,1673) and
-// (1909,1324) respectively -- no screenshot-scale ambiguity this time.
-// Paired with the same real WoW .gps ground truth used previously
-// (Stormwind: -8833.38,628.628 / Kharanos~=Ironforge: -5450.2036,
-// -529.36316) and re-solved the exact 2-point linear system. Verified:
-// both points reproduce their exact target pixels under the new formula.
-// Kalimdor's formula is UNCHANGED -- no screenshot evidence of a problem
-// there, only EK (Stormwind/Dun Morogh) was flagged.
+// EK + KALIMDOR FULLY RECALIBRATED 2026-08-20 using a proper 6-parameter
+// affine transform (px = a*x + b*y + c ; py = d*x + e*y + f) instead of
+// the previous "independent per-axis scale" model. History:
+//   1. Live screenshots showed EK misaligned near Stormwind (clusters
+//      plotting into open ocean). Fixed with a 2-point exact solve using
+//      Leaflet-verified pixel clicks (via #calib-readout) on Stormwind +
+//      Ironforge -- the simpler 4-parameter model.
+//   2. That fix held for Stormwind/Ironforge exactly, but a bot (Dorton)
+//      near Ironforge still plotted north of the real city -- consistent,
+//      not random, meaning the map has genuine rotational/shear skew a
+//      pure-scale model can't represent. Confirmed by solving a full
+//      affine transform with a THIRD EK point (Thelsamar) -- the
+//      resulting off-diagonal coefficients (e.g. ~-0.109 x-contribution
+//      to pos.y) are far from zero, proving real skew exists.
+//   3. Same reasoning applied to Kalimdor pre-emptively (Tanaris was also
+//      reported as visibly off, and Kalimdor's formula had never been
+//      re-verified against the live Leaflet render at all -- it was
+//      still running on the pre-Leaflet-era calibration). Solved fresh
+//      with three points: Orgrimmar, Auberdine (both real ground truth,
+//      Auberdine confirmed via a fresh in-game .gps reading), and
+//      Thunderbluff. Thunderbluff's WoW coordinate is the one piece of
+//      OLD ground truth reused here (originally recorded as "Mulgore/Red
+//      Rocks", not a literal .gps reading standing on Thunderbluff
+//      itself) -- if anything near Mulgore/Thunderbluff still looks off,
+//      this is the point to re-verify first with a fresh .gps reading.
+// All three points per continent reproduce their target pixels exactly
+// (3 non-collinear points exactly determine a 6-parameter affine system).
 // ============================================================
 var CONTINENTS = {
   azeroth: {
@@ -331,13 +337,20 @@ var CONTINENTS = {
     mapIds: [0, 1],
     wowToPixel: function(x, y, m) {
       if (m == 1) {
-        // Kalimdor -- unchanged, not flagged as misaligned
-        return { x: 392.1471 - y * 0.156309, y: 1120.7884 - x * 0.100326 };
+        // Kalimdor -- full affine, solved 2026-08-20 from Orgrimmar,
+        // Auberdine, and Thunderbluff (see comment block above).
+        return {
+          x: 0.001268*x + -0.096633*y + 515.2960,
+          y: -0.124829*x + 0.034007*y + 1373.1883
+        };
       }
-      // Eastern Kingdoms (m == 0, and default fallback) -- recalibrated
-      // 2026-08-20, see comment block above CONTINENTS for the full
-      // derivation.
-      return { x: 1846.3719 - y * 0.118308, y: 761.7707 - x * 0.103157 };
+      // Eastern Kingdoms (m == 0, and default fallback) -- full affine,
+      // solved 2026-08-20 from Stormwind, Ironforge, and Thelsamar (see
+      // comment block above).
+      return {
+        x: 0.011794*x + -0.083850*y + 1928.8936,
+        y: -0.109337*x + -0.018055*y + 718.5313
+      };
     }
   },
   outland: {
@@ -433,8 +446,9 @@ function initMap() {
 
   // Calibration debug tool -- click anywhere on the map to see that
   // point's native pixel coordinates (same space wowToPixel() outputs),
-  // shown in the #calib-readout panel. Left in place after the EK fix in
-  // case Kalimdor/Outland/Northrend need the same treatment later.
+  // shown in the #calib-readout panel. Left in place in case further
+  // recalibration is needed later (e.g. Thunderbluff's ground truth,
+  // see comment block above CONTINENTS).
   map.on('click', function(e) {
     var px = latLngToPixel(e.latlng.lat, e.latlng.lng, currentContinentKey);
     var panel = document.getElementById('calib-readout');
