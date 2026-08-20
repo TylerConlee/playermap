@@ -97,6 +97,30 @@ body {
     color: #EABA28;
 }
 
+/* Temporary calibration debug readout, added 2026-08-20. Click anywhere
+   on the map to see that point's native-image pixel coordinates (i.e.
+   the same space wowToPixel() outputs into) -- used to get precise,
+   reliable ground-truth pixel positions for known landmarks directly from
+   the live Leaflet render, instead of an ambiguous screenshot. Remove
+   this block (CSS + HTML + the map click handler in initMap()) once the
+   EK recalibration is done. */
+#calib-readout {
+    position: fixed;
+    top: 60px;
+    right: 12px;
+    z-index: 500;
+    background: rgba(0,0,0,0.85);
+    border: 1px solid #EABA28;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: verdana, arial, sans-serif, helvetica;
+    color: #EABA28;
+    display: none;
+    max-width: 260px;
+}
+#calib-readout strong { color: #FFFF99; }
+
 /* ---- Player table (unchanged design from the previous version, just no
    longer absolutely positioned relative to a map that could be any
    height -- it's normal document flow below the map now) ---- */
@@ -285,10 +309,18 @@ var status_process_started;
 // coastline, displaced in a consistent direction (not random noise,
 // pointing at a systematic scale/offset problem rather than a rendering
 // bug). Dun Morogh's clusters looked reasonably on-target in the same
-// screenshots. Root cause not yet confirmed -- checking whether the
-// served azeroth.jpg actually matches the assumed 2600x2400 dimensions
-// this file's `bounds` and CONTINENTS.azeroth.width/height rely on is
-// the first thing to rule out before touching the formula itself again.
+// screenshots. CONFIRMED the served azeroth.jpg is genuinely 2600x2400
+// (docker exec + `file`), so the image-dimension mismatch theory is
+// ruled out -- the bounds/CRS math matches the real file. Most likely
+// explanation: this is the same EK calibration inaccuracy flagged as
+// unresolved when the map was originally hidden (two recalibration
+// passes were done, the second "validated" only against a static
+// processed image, never successfully cross-checked against a live
+// render before). Added a click-to-read-pixel-coordinates debug tool
+// (see #calib-readout and the map click handler in initMap()) to get
+// precise, Leaflet-verified ground truth directly, rather than guessing
+// again -- click on a known landmark (Stormwind, Ironforge) and the
+// panel shows the native pixel coordinates to compare against.
 // ============================================================
 var CONTINENTS = {
   azeroth: {
@@ -380,6 +412,14 @@ function toLatLng(pixelX, pixelY, continentKey) {
   return [h - pixelY, pixelX];
 }
 
+// Inverse of toLatLng -- given a Leaflet lat/lng, return the native image
+// pixel coordinates it corresponds to. Used only by the calibration
+// debug click handler below.
+function latLngToPixel(lat, lng, continentKey) {
+  var h = CONTINENTS[continentKey].height;
+  return { x: lng, y: h - lat };
+}
+
 function initMap() {
   map = L.map('leaflet-map', {
     crs: L.CRS.Simple,
@@ -389,6 +429,22 @@ function initMap() {
     attributionControl: false
   });
   switchContinent('azeroth');
+
+  // Calibration debug tool -- click anywhere on the map to see that
+  // point's native pixel coordinates (same space wowToPixel() outputs),
+  // shown in the #calib-readout panel. Temporary, see comments above
+  // CONTINENTS and on #calib-readout's CSS for removal notes.
+  map.on('click', function(e) {
+    var px = latLngToPixel(e.latlng.lat, e.latlng.lng, currentContinentKey);
+    var panel = document.getElementById('calib-readout');
+    panel.style.display = 'block';
+    panel.innerHTML =
+      '<strong>Calibration readout</strong><br>' +
+      'Continent: ' + CONTINENTS[currentContinentKey].label + '<br>' +
+      'Native pixel X: ' + Math.round(px.x) + '<br>' +
+      'Native pixel Y: ' + Math.round(px.y) + '<br>' +
+      '<span style="opacity:0.7;">(click elsewhere to update)</span>';
+  });
 }
 
 function switchContinent(key) {
@@ -774,6 +830,8 @@ function start()
         <button data-continent="northrend" onclick="switchContinent('northrend');">Northrend</button>
     </div>
 </div>
+
+<div id="calib-readout"></div>
 
 <div id="leaflet-map"></div>
 
