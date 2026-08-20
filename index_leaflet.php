@@ -101,9 +101,11 @@ body {
    on the map to see that point's native-image pixel coordinates (i.e.
    the same space wowToPixel() outputs into) -- used to get precise,
    reliable ground-truth pixel positions for known landmarks directly from
-   the live Leaflet render, instead of an ambiguous screenshot. Remove
-   this block (CSS + HTML + the map click handler in initMap()) once the
-   EK recalibration is done. */
+   the live Leaflet render, instead of an ambiguous screenshot. Left in
+   place after the EK fix below in case Kalimdor/Outland/Northrend ever
+   need the same treatment -- remove entirely (this CSS block + the HTML
+   div + the map click handler in initMap()) once calibration work is
+   fully done across all continents. */
 #calib-readout {
     position: fixed;
     top: 60px;
@@ -293,34 +295,31 @@ var status_process_started;
 // Per-continent map configuration (2026-08-19 rewrite)
 //
 // Each entry: source image + native pixel dimensions + the WoW-coordinate
-// formula for that continent. The formulas below are ported directly from
-// the previous version's get_player_position() -- same calibration work
-// (real .gps ground truth + labeled reference map for Azeroth; original
-// values for Outland/Northrend/Ebon Hold), just restructured so each
-// continent is self-contained instead of one big switch statement.
+// formula for that continent. wowToPixel(x, y) returns {x, y} in the
+// image's own NATIVE pixel space (origin top-left, Y increasing downward
+// -- normal image convention). toLatLng() below handles the Y-flip
+// Leaflet's CRS.Simple needs.
 //
-// wowToPixel(x, y) returns {x, y} in the image's own NATIVE pixel space
-// (origin top-left, Y increasing downward -- normal image convention).
-// toLatLng() below handles the Y-flip Leaflet's CRS.Simple needs.
-//
-// KNOWN ISSUE as of 2026-08-20: live screenshots show a genuine,
-// consistent misalignment for Eastern Kingdoms specifically -- several
-// clusters near Stormwind plot into open ocean west of the actual
-// coastline, displaced in a consistent direction (not random noise,
-// pointing at a systematic scale/offset problem rather than a rendering
-// bug). Dun Morogh's clusters looked reasonably on-target in the same
-// screenshots. CONFIRMED the served azeroth.jpg is genuinely 2600x2400
-// (docker exec + `file`), so the image-dimension mismatch theory is
-// ruled out -- the bounds/CRS math matches the real file. Most likely
-// explanation: this is the same EK calibration inaccuracy flagged as
-// unresolved when the map was originally hidden (two recalibration
-// passes were done, the second "validated" only against a static
+// EK RECALIBRATED 2026-08-20. Live screenshots showed a genuine,
+// consistent misalignment for Eastern Kingdoms specifically -- clusters
+// near Stormwind plotted into open ocean west of the actual coastline.
+// Ruled out an image-dimension mismatch first (confirmed served
+// azeroth.jpg is genuinely 2600x2400 via `docker exec ... file`). Root
+// cause was the EK formula itself -- the same calibration inaccuracy
+// flagged as unresolved back when the old map was originally hidden (a
+// prior recalibration pass was only ever validated against a static
 // processed image, never successfully cross-checked against a live
-// render before). Added a click-to-read-pixel-coordinates debug tool
-// (see #calib-readout and the map click handler in initMap()) to get
-// precise, Leaflet-verified ground truth directly, rather than guessing
-// again -- click on a known landmark (Stormwind, Ironforge) and the
-// panel shows the native pixel coordinates to compare against.
+// render). Fixed properly this time using the click-to-read-pixel-
+// coordinates debug tool (#calib-readout, click handler in initMap()):
+// Tyler clicked precisely on Stormwind and Ironforge on the live Leaflet
+// map, giving exact, deterministic pixel targets (1772,1673) and
+// (1909,1324) respectively -- no screenshot-scale ambiguity this time.
+// Paired with the same real WoW .gps ground truth used previously
+// (Stormwind: -8833.38,628.628 / Kharanos~=Ironforge: -5450.2036,
+// -529.36316) and re-solved the exact 2-point linear system. Verified:
+// both points reproduce their exact target pixels under the new formula.
+// Kalimdor's formula is UNCHANGED -- no screenshot evidence of a problem
+// there, only EK (Stormwind/Dun Morogh) was flagged.
 // ============================================================
 var CONTINENTS = {
   azeroth: {
@@ -332,11 +331,13 @@ var CONTINENTS = {
     mapIds: [0, 1],
     wowToPixel: function(x, y, m) {
       if (m == 1) {
-        // Kalimdor
+        // Kalimdor -- unchanged, not flagged as misaligned
         return { x: 392.1471 - y * 0.156309, y: 1120.7884 - x * 0.100326 };
       }
-      // Eastern Kingdoms (m == 0, and default fallback)
-      return { x: 1706.4554 - y * 0.122376, y: 543.4356 - x * 0.125988 };
+      // Eastern Kingdoms (m == 0, and default fallback) -- recalibrated
+      // 2026-08-20, see comment block above CONTINENTS for the full
+      // derivation.
+      return { x: 1846.3719 - y * 0.118308, y: 761.7707 - x * 0.103157 };
     }
   },
   outland: {
@@ -432,8 +433,8 @@ function initMap() {
 
   // Calibration debug tool -- click anywhere on the map to see that
   // point's native pixel coordinates (same space wowToPixel() outputs),
-  // shown in the #calib-readout panel. Temporary, see comments above
-  // CONTINENTS and on #calib-readout's CSS for removal notes.
+  // shown in the #calib-readout panel. Left in place after the EK fix in
+  // case Kalimdor/Outland/Northrend need the same treatment later.
   map.on('click', function(e) {
     var px = latLngToPixel(e.latlng.lat, e.latlng.lng, currentContinentKey);
     var panel = document.getElementById('calib-readout');
