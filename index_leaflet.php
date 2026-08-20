@@ -112,6 +112,52 @@ body {
     margin: 0 0 6px 0;
     text-align: center;
 }
+/* Search box + pagination, added 2026-08-20 alongside the performance
+   fix below -- rendering all ~5000 rows in one unpaginated table on every
+   poll was the actual cause of the slowness reported; paginating and only
+   building DOM for the current page's rows fixes both the performance
+   complaint and gives a natural place to add search. */
+#player-search {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid #EABA28;
+    border-radius: 4px;
+    color: #EABA28;
+    font-size: 13px;
+    font-family: verdana, arial, sans-serif, helvetica;
+}
+#player-search::placeholder { color: #7a6218; }
+#player-table a.char-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dotted currentColor;
+}
+#player-table a.char-link:hover { color: #FFFF99; }
+#player-table-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: #cccccc;
+}
+#player-table-pagination button {
+    background: rgba(0,0,0,0.6);
+    color: #EABA28;
+    border: 1px solid #EABA28;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: verdana, arial, sans-serif, helvetica;
+}
+#player-table-pagination button:disabled { opacity: 0.35; cursor: default; }
+#player-table-pagination button:not(:disabled):hover { background: rgba(234, 186, 40, 0.2); }
 #player-table {
     width: 100%;
     border-collapse: collapse;
@@ -176,6 +222,15 @@ var maps_name_array = new Array(<?php echo "'".implode("','", $lang_defs['maps_n
 var IMG_BASE = "<?php echo $img_base ?>";
 var IMG_BASE2 = "<?php echo $img_base2 ?>";
 
+// Armory linking, added 2026-08-20. Realm slug is matched
+// case-insensitively by the Armory app's router (/character/:realm/:name)
+// -- "hollowpeak" assumed to match the realm name configured in the
+// Armory's own config.json on the droplet, which isn't visible from this
+// repo (not committed, deployment-specific). Worth a quick check if links
+// 404 -- may need adjusting to match the actual configured realm name.
+var ARMORY_BASE = "https://armory.tylerconlee.com";
+var ARMORY_REALM = "hollowpeak";
+
 var race_name = {<?php echo "0:''"; foreach ($character_race as $id => $race) {
     echo(", ".$id.":'".$race."'");
 } ?>}
@@ -223,6 +278,17 @@ var status_process_started;
 // wowToPixel(x, y) returns {x, y} in the image's own NATIVE pixel space
 // (origin top-left, Y increasing downward -- normal image convention).
 // toLatLng() below handles the Y-flip Leaflet's CRS.Simple needs.
+//
+// KNOWN ISSUE as of 2026-08-20: live screenshots show a genuine,
+// consistent misalignment for Eastern Kingdoms specifically -- several
+// clusters near Stormwind plot into open ocean west of the actual
+// coastline, displaced in a consistent direction (not random noise,
+// pointing at a systematic scale/offset problem rather than a rendering
+// bug). Dun Morogh's clusters looked reasonably on-target in the same
+// screenshots. Root cause not yet confirmed -- checking whether the
+// served azeroth.jpg actually matches the assumed 2600x2400 dimensions
+// this file's `bounds` and CONTINENTS.azeroth.width/height rely on is
+// the first thing to rule out before touching the formula itself again.
 // ============================================================
 var CONTINENTS = {
   azeroth: {
@@ -453,10 +519,20 @@ function in_array(value, arr)
   return false;
 }
 
-// ---- Sortable player table (unchanged from the previous version) ----
+// ---- Sortable, searchable, paginated player table ----
+// Rewritten 2026-08-20: the previous version built one giant HTML string
+// for every online character (up to ~5000 with the current bot count) and
+// replaced the whole tbody with it on every single poll cycle -- genuinely
+// heavy DOM work, and the reported cause of the page feeling slow.
+// currentPlayerList still holds the FULL unfiltered/unpaginated dataset
+// (needed so sorting/searching/pagination all operate on the same source
+// of truth); only the current page's rows actually get built into DOM.
 var tableSortColumn = "name";
 var tableSortDirection = 1;
 var currentPlayerList = [];
+var searchTerm = "";
+var currentPage = 1;
+var ROWS_PER_PAGE = 50;
 
 var TABLE_COLUMNS = [
   { key: "name",    label: "Name" },
@@ -475,6 +551,20 @@ function sortTableBy(column)
     tableSortColumn = column;
     tableSortDirection = 1;
   }
+  currentPage = 1; // changing sort order resets to page 1, same as a new search would
+  renderPlayerTableRows();
+}
+
+function updateSearch(value)
+{
+  searchTerm = value.trim().toLowerCase();
+  currentPage = 1;
+  renderPlayerTableRows();
+}
+
+function goToPage(delta)
+{
+  currentPage += delta;
   renderPlayerTableRows();
 }
 
@@ -494,22 +584,33 @@ function buildPlayerTableHeader()
   thead.innerHTML = html;
 }
 
+function armoryLink(name) {
+  return ARMORY_BASE + "/character/" + encodeURIComponent(ARMORY_REALM) + "/" + encodeURIComponent(name);
+}
+
 function renderPlayerTableRows()
 {
   buildPlayerTableHeader();
   var tbody = document.getElementById("player-table-body");
   var emptyMsg = document.getElementById("player-table-empty");
   var table = document.getElementById("player-table");
+  var pagination = document.getElementById("player-table-pagination");
 
-  if (!currentPlayerList.length) {
+  var filtered = searchTerm
+    ? currentPlayerList.filter(function(p) { return p.name.toLowerCase().indexOf(searchTerm) !== -1; })
+    : currentPlayerList;
+
+  if (!filtered.length) {
     table.style.display = "none";
+    pagination.style.display = "none";
     emptyMsg.style.display = "block";
+    emptyMsg.textContent = searchTerm ? "No online players match \"" + searchTerm + "\"." : "No players currently online.";
     return;
   }
   table.style.display = "table";
   emptyMsg.style.display = "none";
 
-  var sorted = currentPlayerList.slice().sort(function(a, b) {
+  var sorted = filtered.slice().sort(function(a, b) {
     var av = a[tableSortColumn], bv = b[tableSortColumn];
     if (typeof av === "string") { av = av.toLowerCase(); bv = bv.toLowerCase(); }
     if (av < bv) return -1 * tableSortDirection;
@@ -517,14 +618,27 @@ function renderPlayerTableRows()
     return 0;
   });
 
+  var totalPages = Math.max(1, Math.ceil(sorted.length / ROWS_PER_PAGE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  if (currentPage < 1) currentPage = 1;
+
+  var startIdx = (currentPage - 1) * ROWS_PER_PAGE;
+  var pageRows = sorted.slice(startIdx, startIdx + ROWS_PER_PAGE);
+
   var html = "";
-  for (var i = 0; i < sorted.length; i++) {
-    var p = sorted[i];
+  for (var i = 0; i < pageRows.length; i++) {
+    var p = pageRows[i];
     var factionClass = p.faction === "Horde" ? "faction-horde" : "faction-alliance";
-    html += "<tr><td>" + p.name + "</td><td>" + p.level + "</td><td>" + p.className +
+    html += "<tr><td><a class=\"char-link\" href=\"" + armoryLink(p.name) + "\" target=\"_blank\" rel=\"noopener\">" + p.name + "</a></td><td>" + p.level + "</td><td>" + p.className +
       "</td><td>" + p.raceName + "</td><td>" + p.zone + "</td><td class=\"" + factionClass + "\">" + p.faction + "</td></tr>";
   }
   tbody.innerHTML = html;
+
+  pagination.style.display = "flex";
+  pagination.innerHTML =
+    '<button onclick="goToPage(-1);" ' + (currentPage <= 1 ? "disabled" : "") + '>&laquo; Prev</button>' +
+    '<span>Page ' + currentPage + ' of ' + totalPages + ' (' + sorted.length + (searchTerm ? " matching" : " online") + ')</span>' +
+    '<button onclick="goToPage(1);" ' + (currentPage >= totalPages ? "disabled" : "") + '>Next &raquo;</button>';
 }
 
 function renderPlayerTable(data)
@@ -667,13 +781,17 @@ function start()
     <span id="status" class="statustext"></span>
 </div>
 
-<!-- Sortable player table -->
+<!-- Sortable, searchable, paginated player table. Click a column header
+     to sort, type in the search box to filter by name, character names
+     link out to their Armory page. -->
 <div id="player-table-wrapper">
     <h3>Online Players</h3>
+    <input type="text" id="player-search" placeholder="Search by character name..." oninput="updateSearch(this.value);">
     <table id="player-table">
         <thead id="player-table-head"></thead>
         <tbody id="player-table-body"></tbody>
     </table>
+    <div id="player-table-pagination"></div>
     <div id="player-table-empty" style="display:none;">No players currently online.</div>
 </div>
 
